@@ -14,7 +14,7 @@ It is based on generic AWS security principles, however at a very small scale:
 
 ### Provision your account
 
-First take the following steps. These steps cannot be automated very easily and it's just a one time activty. Probably you even did it already.
+First take the following steps. These steps cannot be automated very easily and it's just a one time activity. Probably you even did it already.
 
 1. You're logged in in the console as root, go to the **IAM** Dashboard.
 2. Write down the account alias id, we need this in several next steps. Generate an **IAM users sign-in link** and bookmark this link.
@@ -39,7 +39,7 @@ Download the [template.yaml](template.yaml) and go to CloudFormation in the AWS 
 
 ### Use the console
 
-Login to the console as usual. Click on your user name in the top right of the screen and click **Switch Roles**. Enter your account id and the name of the admins role you entered before. If you didn't change it, the default is: **Admins**.
+Login to the console as usual. Click on your user name in the top right of the screen and click **Switch Roles**. Enter your account id and the name of the admins role you entered before. If you didn't change it, the default is: **Admins**. (It's case sensitive.)
 
 ### Use the CLI
 
