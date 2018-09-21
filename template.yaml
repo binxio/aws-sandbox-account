@@ -1,0 +1,219 @@
+Parameters:
+  AdminEmail:
+    Description: "Enter your personal e-mail address"
+    Type: String
+  AdminPassword:
+    Description: "Enter a secure one time password"
+    Type: String
+    MinLength: 16
+    ConstraintDescription: "Must be 16 characters."
+    NoEcho: true
+  SpendingAlarm:
+    Description: "How much are you planning to use in USD?"
+    Default: "100"
+    Type: String
+  AdminsGroupName:
+    Description: "Enter the Admins Group Name, default: Admins."
+    Default: "Admins"
+    Type: String
+  AdminsRoleName:
+    Description: "Enter the Admins Role Name, default: Admins."
+    Default: "Admins"
+    Type: String
+Resources:
+  BillingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: 
+        'Fn::Join':
+          - ''
+          - - Alarm if AWS spending is over $
+            - Ref: SpendingAlarm
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+      - Name: Currency
+        Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold:
+        Ref: "SpendingAlarm"
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+      - Ref: "BillingAlarmNotification"
+      InsufficientDataActions:
+      - Ref: "BillingAlarmNotification"
+  BillingAlarmNotification:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Endpoint: !Ref AdminEmail
+        Protocol: email
+  # This part enables CloudTrail and creates the S3 bucket
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn:
+      - BucketPolicy
+    Properties:
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: true
+      S3BucketName: 
+        Ref: S3Bucket
+      IsLogging: true
+  S3Bucket:
+    DeletionPolicy: Retain
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: 
+        Ref: S3Bucket
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Sid: "AWSCloudTrailAclCheck"
+            Effect: "Allow"
+            Principal: 
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:GetBucketAcl"
+            Resource: !GetAtt S3Bucket.Arn
+          -
+            Sid: "AWSCloudTrailWrite"
+            Effect: "Allow"
+            Principal: 
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:PutObject"
+            Resource:
+              !Sub
+              - "arn:aws:s3:::${Bucket}/AWSLogs/${Account}/*"
+              - { Bucket: !Ref S3Bucket, Account: !Ref "AWS::AccountId" }
+            Condition: 
+              StringEquals:
+                s3:x-amz-acl: "bucket-owner-full-control"
+  # Users must assume the AdminsRole to get access 
+  # The adminsrole can only be assumed when the user
+  # has logged in with MFA
+  AdminsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              Bool:
+                "aws:MultiFactorAuthPresent": "true"
+      MaxSessionDuration: 43200
+      RoleName: !Ref AdminsRoleName
+      Policies:
+        -
+          PolicyName: "AdminsRoleAccess"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement:
+              - 
+                Sid: "FullAdminAccess"
+                Effect: "Allow"
+                Action:
+                  - "*"
+                Resource: "*"
+  # The admins group is allowed to update their own user account
+  # For more administrator permissions the users have permission 
+  # to assume the AdminsRole. For this implementation we looked 
+  # at the best practice provided by AWS.
+  AdminsGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: !Ref AdminsGroupName
+      Policies:
+        - PolicyName: "AdminsGroupAccessPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Sid: "AllowAllUsersToListAccounts"
+                Effect: "Allow"
+                Action: 
+                  - "iam:ListAccountAliases"
+                  - "iam:ListUsers"
+                  - "iam:ListVirtualMFADevices"
+                  - "iam:GetAccountPasswordPolicy"
+                  - "iam:GetAccountSummary"
+                Resource: "*"
+              -
+                Sid: "AllowUserToSetChangeTheirPasswordAndMFA"
+                Effect: "Allow"
+                Action:
+                  - "iam:CreateVirtualMFADevice"
+                  - "iam:EnableMFADevice"
+                  - "iam:ListMFADevices"
+                  - "iam:ResyncMFADevice"
+                Resource:
+                  - "arn:aws:iam::*:mfa/${aws:username}"
+                  - "arn:aws:iam::*:user/${aws:username}"
+              - 
+                Sid: "AllowIndividualUserToSeeAndManageOnlyTheirOwnAccountInformation"
+                Effect: "Allow"
+                Action: 
+                  - "iam:ChangePassword"
+                  - "iam:CreateAccessKey"
+                  - "iam:CreateLoginProfile"
+                  - "iam:DeleteAccessKey"
+                  - "iam:DeleteLoginProfile"
+                  - "iam:GetLoginProfile"
+                  - "iam:ListAccessKeys"
+                  - "iam:UpdateAccessKey"
+                  - "iam:UpdateLoginProfile"
+                  - "iam:ListSigningCertificates"
+                  - "iam:DeleteSigningCertificate"
+                  - "iam:UpdateSigningCertificate"
+                  - "iam:UploadSigningCertificate"
+                  - "iam:ListSSHPublicKeys"
+                  - "iam:GetSSHPublicKey"
+                  - "iam:DeleteSSHPublicKey"
+                  - "iam:UpdateSSHPublicKey"
+                  - "iam:UploadSSHPublicKey"
+                Resource: "arn:aws:iam::*:user/${aws:username}"
+                Condition:
+                  Bool:
+                    "aws:MultiFactorAuthPresent": "true"
+              -
+                Sid: "AllowIndividualUserToDeactivateOnlyTheirOwnMFAOnlyWhenUsingMFA"
+                Effect: "Allow"
+                Action:
+                  - "iam:DeactivateMFADevice"
+                Resource:
+                  - "arn:aws:iam::*:mfa/${aws:username}"
+                  - "arn:aws:iam::*:user/${aws:username}"
+                Condition:
+                  Bool:
+                    "aws:MultiFactorAuthPresent": "true"
+              -
+                Sid: "AllowAssumeAdminsRole"
+                Effect: "Allow"
+                Action:
+                  - "sts:AssumeRole"
+                Resource: !GetAtt AdminsRole.Arn
+  # Create a user. You can of course add more users, but
+  # maybe it's better to use different user names and 
+  # passwords
+  AdminUser:
+    Type: AWS::IAM::User
+    Properties:
+      Groups:
+        - !Ref AdminsGroup
+      LoginProfile:
+        Password: !Ref AdminPassword
+        PasswordResetRequired: true
+      UserName: !Ref AdminEmail
